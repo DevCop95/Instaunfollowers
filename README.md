@@ -35,7 +35,7 @@ Sin extensiones. Sin apps de terceros. Sin acceso a tu contraseña. Todo ocurre 
 1. Abre [instagram.com](https://www.instagram.com) y asegúrate de estar logueado
 2. Abre las DevTools: `F12` en Windows/Linux · `Cmd+Opt+I` en Mac
 3. Ve a la pestaña **Console**
-4. Pega el contenido completo de `instagram-unfollowers-v8.js` y presiona `Enter`
+4. Pega el contenido completo de `instaun.js` y presiona `Enter`
 
 ### Opción B — Snippet guardado (recomendado)
 
@@ -48,7 +48,7 @@ Sin extensiones. Sin apps de terceros. Sin acceso a tu contraseña. Todo ocurre 
 Crea un marcador con esta URL (reemplaza `URL` con donde alojes el archivo):
 
 ```
-javascript:(function(){var s=document.createElement('script');s.src='https://TU_SERVIDOR/instagram-unfollowers-v8.js';document.body.appendChild(s);})();
+javascript:(function(){var s=document.createElement('script');s.src='https://TU_SERVIDOR/instaun.js';document.body.appendChild(s);})();
 ```
 
 > Para inyectarlo de nuevo mientras está abierto, ejecuta el script otra vez — se cierra automáticamente.
@@ -234,7 +234,7 @@ El script usa la misma API interna que usa el sitio web de Instagram. Si cambia,
 ## Estructura del proyecto
 
 ```
-instagram-unfollowers-v8.js   ← Script principal (inyectable)
+instaun.js   ← Script principal (inyectable)
 README.md                      ← Esta documentación
 preview.png                    ← Screenshot de portada (añade el tuyo)
 ```
