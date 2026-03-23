@@ -12,7 +12,7 @@
 
 <br/>
 
-<img src="preview.png" alt="OSINT Terminal v2.0 — interface preview" width="680"/>
+<img src="preview.png" alt="Instaunfollowers v1 — interface preview" width="680"/>
 
 <br/>
 
