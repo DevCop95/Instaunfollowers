@@ -12,7 +12,7 @@
   window.__iu_running__ = true;
 
   // ── CONSTANTS ────────────────────────────────────────────────────
-  const SK = { WL:'iu_wl_v3', CFG:'iu_cfg_v3', RESUME:'iu_res_v3', LOG:'iu_log_v3' };
+  const SK = { WL:'iu_wl_v3', CFG:'iu_cfg_v3', RESUME:'iu_res_v3', LOG:'iu_log_v3', MUTUALS:'iu_mut_v3' };
   const PER_PAGE = 50;
   const GQL_HASH = '3dec7e2c57367ef3da3d987d89f9dbc8';
   const RESUME_TTL = 86400000; // 24h (#3 fix — was 1h)
@@ -36,16 +36,18 @@
     users        : [],       // following list
     selected     : new Set(),
     whitelist    : new Set(),
+    lost         : new Set(),
     filter       : { nonFollowers:true, followers:false, verified:true, private:true, noAvatar:true },
     search       : '',
     page         : 1,
-    tab          : 'non_whitelisted',  // non_whitelisted | whitelisted | mutual | ghost
+    tab          : 'non_whitelisted',  // non_whitelisted | whitelisted | mutual | ghost | lost
     scan         : { cursor:'', total:0, fetched:0, reqs:0, retries:0, startedAt:0 },
     unfollow     : { queue:[], log:[], idx:0, paused:false, skipId:null },
     cfg          : { ...DEFAULT_CFG },
     adaptiveMs   : 1200,
     settingsOpen : false,
     wlImportMode : 'merge',
+    sortBy       : 'username',
     // dirty flags per section (#14)
     dirty        : { header:true, sidebar:true, main:true, settings:true },
   };
@@ -106,10 +108,11 @@
 
   // ── DERIVED / FILTER (#13 — single pass) ─────────────────────────
   const computeDerived = () => {
-    let mutual=0, ghost=0, verified=0, priv=0, noAv=0;
+    let mutual=0, ghost=0, lost=0, verified=0, priv=0, noAv=0;
     const filtered = [];
     for (const u of S.users) {
       if (u.follows_viewer) mutual++; else ghost++;
+      if (S.lost.has(u.id)) lost++;
       if (u.is_verified)    verified++;
       if (u.is_private)     priv++;
       if (noAvatar(u.profile_pic_url)) noAv++;
@@ -119,8 +122,9 @@
       if (S.tab === 'whitelisted'     && !inWl) continue;
       if (S.tab === 'ghost'           &&  u.follows_viewer) continue;
       if (S.tab === 'mutual'          && !u.follows_viewer) continue;
+      if (S.tab === 'lost'            && !S.lost.has(u.id)) continue;
       // category filters only apply on non_whitelisted/whitelisted tabs
-      const structuralTab = S.tab === 'ghost' || S.tab === 'mutual';
+      const structuralTab = S.tab === 'ghost' || S.tab === 'mutual' || S.tab === 'lost';
       if (!structuralTab) {
         if (!S.filter.followers    &&  u.follows_viewer) continue;
         if (!S.filter.nonFollowers && !u.follows_viewer) continue;
@@ -139,8 +143,14 @@
       }
       filtered.push(u);
     }
-    filtered.sort((a, b) => a.username.localeCompare(b.username));
-    return { filtered, stats:{ total:S.users.length, mutual, ghost, verified, priv, noAv, ratio: S.users.length ? Math.round(mutual/S.users.length*100) : 0 } };
+    if (S.sortBy === 'username') {
+      filtered.sort((a, b) => a.username.localeCompare(b.username));
+    } else if (S.sortBy === 'newest') {
+      filtered.sort((a, b) => b._idx - a._idx);
+    } else if (S.sortBy === 'oldest') {
+      filtered.sort((a, b) => a._idx - b._idx);
+    }
+    return { filtered, stats:{ total:S.users.length, mutual, ghost, lost, verified, priv, noAv, ratio: S.users.length ? Math.round(mutual/S.users.length*100) : 0 } };
   };
 
   const getPage = all => all.slice((S.page-1)*PER_PAGE, S.page*PER_PAGE);
@@ -232,6 +242,7 @@
         <div class="iu-sr"><span>Siguiendo</span><b>${st.total}</b></div>
         <div class="iu-sr"><span>Mutuos</span><b class="iu-g">${st.mutual}</b></div>
         <div class="iu-sr"><span>No te siguen</span><b class="iu-r">${st.ghost}</b></div>
+        ${st.lost > 0 ? `<div class="iu-sr"><span>Perdidos</span><b class="iu-warn-txt">${st.lost}</b></div>` : ''}
         <div class="iu-sr"><span>% Seguimiento mutuo</span><b>${st.ratio}%</b></div>
         ${S.scan.total ? `<div class="iu-sr iu-sr-scan"><span>Escaneado</span><b>${S.scan.fetched}/${S.scan.total}</b></div>` : ''}
         ${eta ? `<div class="iu-sr"><span>Tiempo restante</span><b class="iu-eta">~${fmtTime(eta)}</b></div>` : ''}
@@ -250,6 +261,13 @@
       <label class="iu-chk-row"><input type="checkbox" data-action="filter" data-key="verified"     ${S.filter.verified?'checked':''}> Verificados</label>
       <label class="iu-chk-row"><input type="checkbox" data-action="filter" data-key="private"      ${S.filter.private?'checked':''}> Privados</label>
       <label class="iu-chk-row"><input type="checkbox" data-action="filter" data-key="noAvatar"     ${S.filter.noAvatar?'checked':''}> Sin foto</label>
+      <hr class="iu-hr">
+      <p class="iu-lbl">Ordenar por</p>
+      <select class="iu-select" data-action="sort">
+        <option value="username" ${S.sortBy==='username'?'selected':''}>Alfabético (A-Z)</option>
+        <option value="newest" ${S.sortBy==='newest'?'selected':''}>Más recientes primero</option>
+        <option value="oldest" ${S.sortBy==='oldest'?'selected':''}>Más antiguos primero</option>
+      </select>
       <hr class="iu-hr">
       <p class="iu-lbl">Selección rápida</p>
       <div class="iu-smart-grid">
@@ -376,6 +394,10 @@
         <div class="iu-tab ${S.tab==='mutual'?'iu-tab-active':''}" data-action="set-tab" data-tab="mutual">
           Mutuos <span class="iu-tab-count">${_derived.stats.mutual}</span>
         </div>
+        ${_derived.stats.lost > 0 ? `
+        <div class="iu-tab ${S.tab==='lost'?'iu-tab-active':''}" data-action="set-tab" data-tab="lost">
+          Perdidos <span class="iu-tab-count">${_derived.stats.lost}</span>
+        </div>` : ''}
       </nav>
       <div class="iu-results" id="__iu_results__">
         ${!pageUsers.length
@@ -498,6 +520,7 @@
   const _resetScanState = () => {
     _scanActive = false; _scanPaused = false; _scanRunning = false;
     _seenIds = new Set();
+    S.lost.clear();
     clearTimeout(_resumeTimer); // cancel any pending save
   };
 
@@ -507,6 +530,7 @@
     for (const node of nodes) {
       if (node?.id && !_seenIds.has(node.id)) {
         _seenIds.add(node.id);
+        node._idx = S.users.length;
         S.users.push(node);
         added++;
       }
@@ -613,6 +637,20 @@
       S.phase = 'done'; _scanActive = false; _scanRunning = false;
       clearTimeout(_resumeTimer);
       lsDel(SK.RESUME);
+
+      const prevMutuals = new Set(lsGet(SK.MUTUALS, []));
+      const currMutuals = new Set();
+
+      S.lost.clear();
+      for (const u of S.users) {
+        if (u.follows_viewer) {
+          currMutuals.add(u.id);
+        } else if (prevMutuals.has(u.id)) {
+          S.lost.add(u.id);
+        }
+      }
+      lsSet(SK.MUTUALS, [...currMutuals]);
+
       toast(`Escaneo completo — ${S.users.length} cuentas encontradas`, 'success', 8000);
     } else {
       _scanRunning = false;
@@ -815,6 +853,7 @@
     const el=e.target, a=el.dataset.action;
     if (!a) return;
     if (a==='filter')      { S.filter[el.dataset.key]=el.checked; S.page=1; markAllDirty(); render(); return; }
+    if (a==='sort')        { S.sortBy=el.value; S.page=1; markDirty('header','sidebar','main'); render(); return; }
     if (a==='toggle-user') { el.checked?S.selected.add(el.dataset.uid):S.selected.delete(el.dataset.uid); markDirty('header','sidebar'); render(); return; }
     if (a==='select-all')  { const f=_derived.filtered; el.checked?f.forEach(u=>S.selected.add(u.id)):f.forEach(u=>S.selected.delete(u.id)); markDirty('header','sidebar','main'); render(); return; }
     if (a==='select-page') { getPage(_derived.filtered).forEach(u=>el.checked?S.selected.add(u.id):S.selected.delete(u.id)); markDirty('header','sidebar','main'); render(); return; }
@@ -923,6 +962,10 @@
     .iu-chk-row{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;cursor:pointer;font-size:.78rem;color:#bbb;margin-bottom:2px;transition:background .12s,color .12s}
     .iu-chk-row:hover{background:rgba(255,255,255,.07);color:#fff}
     .iu-chk-row input{cursor:pointer;accent-color:#0a84ff;width:13px;height:13px;flex-shrink:0}
+
+    .iu-select{width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#fff;padding:6px;font-size:.78rem;outline:none;cursor:pointer;margin-bottom:4px}
+    .iu-select:focus{border-color:#0a84ff}
+    .iu-select option{background:#111;color:#fff}
 
     .iu-smart-grid{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:2px}
     .iu-sec-btn{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);color:#aaa;padding:3px 9px;border-radius:20px;cursor:pointer;font-size:.72rem;font-weight:500;transition:background .12s,color .12s;white-space:nowrap}
